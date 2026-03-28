@@ -28,6 +28,8 @@ export interface StrategyConfig {
   minPositionSize: number;
   /** Check interval in milliseconds */
   checkInterval: number;
+  /** Run automation only once (disable periodic scan when true) */
+  runOnce?: boolean;
   /** Slippage tolerance for swaps (as decimal) */
   slippageTolerance: number;
 }
@@ -80,6 +82,7 @@ export class YieldStrategyEngine {
       minPositionSize: config.minPositionSize ?? 0.05,
       checkInterval: config.checkInterval ?? 300_000, // 5 minutes
       slippageTolerance: config.slippageTolerance ?? 0.005,
+      checkInterval: config.checkInterval ?? 3600000, // 1 hour
     };
     
     this.portfolio = {
