@@ -26,12 +26,31 @@ export class TinyFishClient extends EventEmitter {
   private apiKey: string;
   private browserProfile: BrowserProfile;
   private proxyConfig?: ProxyConfig;
+  private requestIdCounter: number = 0;
+  private logPrefix = '[TinyFishClient]';
+  private debugEnabled: boolean;
 
   constructor(config: TinyFishConfig) {
     super();
     this.apiKey = config.apiKey;
     this.browserProfile = config.browserProfile || 'stealth';
     this.proxyConfig = config.proxyConfig;
+    this.debugEnabled = process.env.TINYFISH_DEBUG === 'true';
+  }
+
+  private nextRequestId(): number {
+    this.requestIdCounter += 1;
+    return this.requestIdCounter;
+  }
+
+  private log(message: string, ...params: any[]): void {
+    console.log(`${this.logPrefix} ${message}`, ...params);
+  }
+
+  private debug(message: string, ...params: any[]): void {
+    if (this.debugEnabled) {
+      console.debug(`${this.logPrefix} DEBUG ${message}`, ...params);
+    }
   }
 
   /**
@@ -40,6 +59,9 @@ export class TinyFishClient extends EventEmitter {
    * @param goal - Natural language description of what to accomplish
    */
   async runAutomation(url: string, goal: string): Promise<TinyFishAutomationResult> {
+    const requestId = this.nextRequestId();
+    this.log(`runAutomation start (#${requestId})`, { url, goal, profile: this.browserProfile, proxy: this.proxyConfig });
+
     const request: TinyFishAutomationRequest = {
       url,
       goal,
@@ -47,7 +69,14 @@ export class TinyFishClient extends EventEmitter {
       proxy_config: this.proxyConfig
     };
 
-    return this.runSSEAutomation(request);
+    try {
+      const result = await this.runSSEAutomation(request);
+      this.log(`runAutomation complete (#${requestId}) status=${result.status}`, { runId: result.run_id, events: result.events.length, error: result.error });
+      return result;
+    } catch (error) {
+      this.log(`runAutomation error (#${requestId})`, error);
+      throw error;
+    }
   }
 
   /**
@@ -61,15 +90,21 @@ export class TinyFishClient extends EventEmitter {
    * Execute SSE-based automation with streaming events
    */
   private async runSSEAutomation(request: TinyFishAutomationRequest): Promise<TinyFishAutomationResult> {
+    const requestId = this.nextRequestId();
     const events: TinyFishEvent[] = [];
     let runId = '';
     let streamingUrl = '';
+
+    this.log(`runSSEAutomation start (#${requestId})`, { request });
 
     const requestBody = JSON.stringify(request);
 
     // Create abort controller for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      this.log(`runSSEAutomation timeout (#${requestId})`);
+    }, TIMEOUT_MS);
 
     try {
       const response = await fetch(`${TINYFISH_BASE_URL}/v1/automation/run-sse`, {
@@ -81,6 +116,9 @@ export class TinyFishClient extends EventEmitter {
         body: requestBody,
         signal: controller.signal
       });
+
+      this.log(`runSSEAutomation response (#${requestId}) status=${response.status}`);
+
 
       if (!response.ok) {
         throw new Error(`TinyFish API error: ${response.status} ${response.statusText}`);
@@ -104,11 +142,14 @@ export class TinyFishClient extends EventEmitter {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
+            this.debug(`runSSEAutomation (#${requestId}) incoming line`, { line: data });
             try {
               const event = JSON.parse(data) as TinyFishEvent;
               event.timestamp = Date.now();
               events.push(event);
               this.emit('event', event);
+
+              this.log(`runSSEAutomation (#${requestId}) event`, { type: event.type, runId: event.run_id, status: event.status });
 
               switch (event.type) {
                 case 'STARTED':
@@ -119,6 +160,7 @@ export class TinyFishClient extends EventEmitter {
                   break;
                 case 'COMPLETE':
                   clearTimeout(timeoutId);
+                  this.log(`runSSEAutomation complete (#${requestId})`);
                   return {
                     run_id: runId,
                     status: event.status || 'COMPLETED',
@@ -128,6 +170,7 @@ export class TinyFishClient extends EventEmitter {
                   };
                 case 'ERROR':
                   clearTimeout(timeoutId);
+                  this.log(`runSSEAutomation error event (#${requestId})`, event);
                   return {
                     run_id: runId,
                     status: 'FAILED',
@@ -136,13 +179,14 @@ export class TinyFishClient extends EventEmitter {
                   };
               }
             } catch (e) {
-              // Skip invalid JSON lines
+              this.log(`runSSEAutomation (#${requestId}) invalid JSON line`, e);
             }
           }
         }
       }
 
       clearTimeout(timeoutId);
+      this.log(`runSSEAutomation complete (#${requestId}) final`);
       return {
         run_id: runId,
         status: 'COMPLETED',
@@ -151,11 +195,13 @@ export class TinyFishClient extends EventEmitter {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.log(`runSSEAutomation error (#${requestId})`, errMsg, error);
       return {
         run_id: runId,
         status: 'FAILED',
         events,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: errMsg
       };
     }
   }
@@ -167,16 +213,21 @@ export class TinyFishClient extends EventEmitter {
     const results = new Map<string, TinyFishAutomationResult>();
     
     const promises = targets.map(async (target) => {
+      const targetId = this.nextRequestId();
+      this.log(`scanMultiple target start (#${targetId})`, target.id);
       try {
         const result = await this.runScanTarget(target);
         results.set(target.id, result);
+        this.log(`scanMultiple target complete (#${targetId})`, target.id, result.status);
         return { target, result };
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : 'Unknown error';
+        this.log(`scanMultiple target error (#${targetId})`, target.id, errMsg);
         results.set(target.id, {
           run_id: '',
           status: 'FAILED',
           events: [],
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: errMsg
         });
         return { target, error };
       }
