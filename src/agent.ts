@@ -13,13 +13,13 @@
  * Finds best yield and executes strategy autonomously
  */
 
-import { TinyFishClient } from './tinyfish/client.js';
-import { WDKWallet, WDKConfig } from './wdk/wallet.js';
-import { YieldStrategyEngine, StrategyConfig } from './strategy/engine.js';
-import { AaveAdapter } from './protocols/aave.js';
-import { UniswapAdapter } from './protocols/uniswap.js';
-import { PolicyEngine, PolicyConfig, DEFAULT_POLICY_CONFIG, TEST_POLICY_CONFIG } from './safety/policy.js';
-import type { AgentState, YieldOpportunity, StrategyDecision } from './types/index.js';
+import { TinyFishClient } from './tinyfish/client';
+import { WDKWallet, WDKConfig } from './wdk/wallet';
+import { YieldStrategyEngine, StrategyConfig } from './strategy/engine';
+import { AaveAdapter } from './protocols/aave';
+import { UniswapAdapter } from './protocols/uniswap';
+import { PolicyEngine, PolicyConfig, DEFAULT_POLICY_CONFIG, TEST_POLICY_CONFIG } from './safety/policy';
+import type { AgentState, YieldOpportunity, StrategyDecision } from './types/index';
 
 /**
  * Agent Configuration
